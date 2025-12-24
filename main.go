@@ -11,6 +11,14 @@ import (
 	"github.com/rivo/uniseg"
 )
 
+func init() {
+	if len(os.Args) > 1 && os.Args[1] == "tcell" {
+		return // continue to tcell demo in main()
+	}
+	runGocuiDemo()
+	os.Exit(0)
+}
+
 var icons = []struct {
 	Name string
 	Icon string
@@ -23,6 +31,21 @@ var icons = []struct {
 	{"Info", "ℹ️"},
 	{"TextGear", "⛭"},
 	{"Package", "📦"},
+}
+
+// Characters affected by EastAsianWidth setting
+var ambiguousChars = []struct {
+	Name string
+	Char string
+}{
+	{"Greek α", "α"},
+	{"Greek Σ", "Σ"},
+	{"Cyrillic Д", "Д"},
+	{"Roman Ⅳ", "Ⅳ"},
+	{"Arrow →", "→"},
+	{"Music ♪", "♪"},
+	{"Star ★", "★"},
+	{"Circle ●", "●"},
 }
 
 var screen tcell.Screen
@@ -55,7 +78,7 @@ func main() {
 			}
 			if ev.Rune() == 't' {
 				eastAsianWidth = !eastAsianWidth
-				runewidth.DefaultCondition.EastAsianWidth = eastAsianWidth
+				screen.Sync()
 				draw()
 				screen.Show()
 			}
@@ -114,12 +137,18 @@ func draw() {
 	boxHeight := len(icons) + 2
 
 	// BROKEN - on its own row (corrupts anything on same row)
-	drawString(0, y, "BROKEN", redStyle)
+	drawString(0, y, "BROKEN: FE0F as separate cell (causes ││ artifact)", redStyle)
 	y++
 	drawBox(0, y, boxWidth, boxHeight, style)
 	boxStartY := y
 	y++
 	for _, icon := range icons {
+		// Clear the content area first
+		for x := 1; x < boxWidth-1; x++ {
+			screen.SetContent(x, y, ' ', nil, style)
+		}
+		// Broken: each rune in separate cell, including FE0F
+		// FE0F as standalone cell causes visual artifact (double │)
 		x := 2
 		for _, r := range icon.Icon {
 			screen.SetContent(x, y, r, nil, style)
@@ -130,9 +159,9 @@ func draw() {
 	y = boxStartY + boxHeight + 1
 
 	// FIXED | WORKAROUND - side by side (both use correct rendering)
-	col2X := boxWidth + 2
-	drawString(0, y, "FIXED", greenStyle)
-	drawString(col2X, y, "WORKAROUND", style)
+	col2X := 50
+	drawString(0, y, "FIXED: combc[] for FE0F", greenStyle)
+	drawString(col2X, y, "WORKAROUND: strip FE0F", style)
 	y++
 	drawBox(0, y, boxWidth, boxHeight, style)
 	drawBox(col2X, y, boxWidth, boxHeight, style)
@@ -174,14 +203,14 @@ func draw() {
 
 	// Embedded titles - BROKEN on own row
 	titleBoxW := 22
-	drawString(0, y, "Embedded title: BROKEN", redStyle)
+	drawString(0, y, "Title BROKEN: per-rune", redStyle)
 	y++
 	drawBoxWithTitle(0, y, titleBoxW, 3, "⚙️ Settings", false, style)
 	y += 4
 
 	// FIXED | Multi-icon side by side
-	drawString(0, y, "FIXED", greenStyle)
-	drawString(titleBoxW+2, y, "Multiple icons", greenStyle)
+	drawString(0, y, "Title FIXED: combc[]", greenStyle)
+	drawString(titleBoxW+2, y, "Multi-icon: combc[]", greenStyle)
 	y++
 	drawBoxWithTitle(0, y, titleBoxW, 3, "⚙️ Settings", true, style)
 	drawBoxWithTitle(titleBoxW+2, y, titleBoxW+8, 3, "📦 Pkg ⚙️ Cfg", true, style)
@@ -195,9 +224,23 @@ func draw() {
 	drawBoxWithTitle((bw+1)*3, y, bw, 3, "📦 Pkg", true, style)
 	y += 4
 
+	// EastAsianWidth test - these chars change width with 't' toggle
+	yellowStyle := tcell.StyleDefault.Foreground(tcell.ColorYellow)
+	drawString(0, y, fmt.Sprintf("EastAsianWidth: %v (press 't' to toggle)", eastAsianWidth), yellowStyle)
+	y++
+	drawString(0, y, "Char | RW | Name (RW=1 when false, RW=2 when true)", style)
+	y++
+	cond := &runewidth.Condition{EastAsianWidth: eastAsianWidth}
+	for _, c := range ambiguousChars {
+		rw := cond.StringWidth(c.Char)
+		drawGrapheme(0, y, c.Char, style)
+		drawString(4, y, fmt.Sprintf("| %d  | %s", rw, c.Name), style)
+		y++
+	}
+
 	// Draw width indicator at bottom
 	_, h := screen.Size()
-	drawString(0, h-1, fmt.Sprintf("Screen: %dx%d | Press 't' toggle EastAsian, 'q' quit", w, h), style)
+	drawString(0, h-1, fmt.Sprintf("Screen: %dx%d | 't'=toggle EastAsian, 'q'=quit", w, h), style)
 }
 
 // drawString draws a simple string (no special handling)
